@@ -232,7 +232,7 @@ body{background:var(--bg);color:var(--txt);font-family:var(--font-mono);font-siz
   <span id="tb-mode-badge" class="mode-badge mode-normal">NORMAL</span>
   <span id="tb-regime-badge" class="regime-badge regime-neu">SIDEWAYS</span>
   <button class="btn btn-start" id="btn-start" onclick="botStart()">▶ BAŞLAT</button>
-  <button class="btn btn-stop" id="btn-stop" onclick="botStop()" style="display:none">⏹ DURDUR</button>
+  <button class="btn btn-stop" id="btn-stop" onclick="botStop()">⏹ DURDUR</button>
   <button class="btn btn-csv" onclick="downloadCSV()">⬇ CSV</button>
 </div>
 
@@ -764,18 +764,29 @@ async function pollState(){
     const res=await fetch('/api/state');
     const s=await res.json();
     renderState(s);
-    document.getElementById('btn-start').style.display = s.running?'none':'inline-block';
-    document.getElementById('btn-stop').style.display  = s.running?'inline-block':'none';
+  const bStart=document.getElementById('btn-start');
+  const bStop=document.getElementById('btn-stop');
+  bStart.style.opacity=s.running?'0.4':'1'; bStart.style.cursor=s.running?'not-allowed':'pointer'; bStart.disabled=s.running;
+  bStop.style.opacity=s.running?'1':'0.4';  bStop.style.cursor=s.running?'pointer':'not-allowed';  bStop.disabled=!s.running;
+
   } catch(e){ console.warn('Poll error:',e); }
 }
 
 async function botStart(){
-  await fetch('/api/start',{method:'POST'});
-  setTimeout(pollState,1000);
+  const btn=document.getElementById('btn-start');
+  btn.textContent='⏳ Başlatılıyor…'; btn.disabled=true;
+  try{
+    const r=await fetch('/api/start',{method:'POST'});
+    const d=await r.json();
+    if(!d.ok){alert(d.msg); btn.textContent='▶ BAŞLAT'; btn.disabled=false; return;}
+  }catch(e){btn.textContent='▶ BAŞLAT'; btn.disabled=false; return;}
+  setTimeout(pollState,1500);
 }
 async function botStop(){
-  await fetch('/api/stop',{method:'POST'});
-  setTimeout(pollState,1000);
+  const btn=document.getElementById('btn-stop');
+  btn.textContent='⏳ Durduruluyor…'; btn.disabled=true;
+  try{await fetch('/api/stop',{method:'POST'});}catch(_){}
+  setTimeout(()=>{btn.textContent='⏹ DURDUR'; pollState();},1500);
 }
 function downloadCSV(){
   window.open('/api/trades/csv','_blank');
@@ -793,6 +804,7 @@ function safeInit(){
   initChart();
   initMiniCharts();
   pollState();
+  setTimeout(pollState,800);
   setInterval(pollState, 5000);
 }
 
