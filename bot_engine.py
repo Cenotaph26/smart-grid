@@ -23,7 +23,7 @@ def get_cfg():
         "SYMBOL"           : os.getenv("SYMBOL","ETHUSDT"),
         "LEVERAGE"         : int(os.getenv("LEVERAGE","2")),
         "CAPITAL_PER_GRID" : float(os.getenv("CAPITAL_PER_GRID","500")),
-        "INITIAL_CAPITAL"  : float(os.getenv("INITIAL_CAPITAL","10000")),
+        "INITIAL_CAPITAL"  : None,   # Binance'den otomatik çekilir
         # V4 optimized params
         "N_GRIDS"          : int(os.getenv("N_GRIDS","15")),
         "ATR_MULT"         : float(os.getenv("ATR_MULT","2.0")),
@@ -196,7 +196,8 @@ class SmartGridBotV4:
         self.client     = None
         self.csv        = TradeCSV(cfg["CSV_PATH"])
         self.mode       = "normal"
-        self.phi        = cfg["INITIAL_CAPITAL"]   # portfolio high
+        # phi ve cash run() başında Binance'den güncellenir
+        self.phi        = 10000.0
         self.sl_level   = 0.0
         self.trail_bar  = 0
         self.prev_regime= None
@@ -204,7 +205,7 @@ class SmartGridBotV4:
         self.last_sorb  = 0
         self.grid_lv    = []
         self.positions  = {}   # {key:{side,qty,entry,tp}}
-        self.cash       = cfg["INITIAL_CAPITAL"]
+        self.cash       = 10000.0
         self.total_fees = 0.0
         self.trades     = 0
         self.rl_pnl     = 0.0
@@ -546,15 +547,29 @@ class SmartGridBotV4:
     def run(self):
         cfg = self.cfg
         STATE.reset()
-        STATE.running        = True
-        STATE.initial_capital= cfg["INITIAL_CAPITAL"]
-        STATE.cfg            = cfg
+        STATE.running = True
+        STATE.cfg     = cfg
 
         if not self.connect():
             STATE.error_msg = "Binance bağlantısı başarısız"
             STATE.running   = False
             return
 
+        # ★ Başlangıç sermayesini Binance'den çek
+        try:
+            real_capital = self.get_portfolio()
+            cfg["INITIAL_CAPITAL"] = real_capital
+            self.phi  = real_capital
+            self.cash = real_capital
+            log.info(f"💰 Başlangıç sermayesi Binance'den alındı: ${real_capital:.2f}")
+        except Exception as e:
+            log.error(f"Sermaye çekme hatası: {e} — varsayılan $10000 kullanılıyor")
+            cfg["INITIAL_CAPITAL"] = 10000.0
+            self.phi  = 10000.0
+            self.cash = 10000.0
+
+        STATE.initial_capital = cfg["INITIAL_CAPITAL"]
+        STATE.portfolio_hi    = cfg["INITIAL_CAPITAL"]
         log.info("🚀 Grid Bot v4 başlatıldı")
         while STATE.running:
             try:
