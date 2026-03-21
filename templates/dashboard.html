@@ -428,11 +428,14 @@ function initChart(){
     crosshairMarkerVisible:false,
   });
 
-  // Resize observer
-  new ResizeObserver(()=>{
+  // Resize observer — başlangıçta da boyutla
+  function resizeChart(){
     const r = el.getBoundingClientRect();
-    chart.resize(r.width, r.height);
-  }).observe(el);
+    if(r.width > 0 && r.height > 0) chart.resize(r.width, r.height);
+  }
+  new ResizeObserver(resizeChart).observe(el);
+  // İlk boyutlandırma için kısa gecikme
+  setTimeout(resizeChart, 50);
 
   loadKlines(currentInterval);
   // Canlı güncelleme: her 30 saniyede bir son mumu güncelle
@@ -449,6 +452,10 @@ async function loadKlines(interval){
     chartData = data;
     const candles = data.map(d=>({time:d.time,open:d.open,high:d.high,low:d.low,close:d.close}));
     const vols    = data.map(d=>({time:d.time,value:d.volume,color:d.close>=d.open?'rgba(0,230,118,.2)':'rgba(255,61,87,.2)'}));
+    if(!candleSeries||!volumeSeries){
+      document.getElementById('chart-status').textContent='Chart hazırlanıyor, lütfen bekleyin…';
+      setTimeout(()=>loadKlines(interval),500); return;
+    }
     candleSeries.setData(candles);
     volumeSeries.setData(vols);
     calcAndDrawEMAs(candles);
@@ -464,7 +471,7 @@ async function fetchLastCandle(){
   try{
     const res  = await fetch(`/api/klines?interval=${currentInterval}&limit=2`);
     const data = await res.json();
-    if(!data||data.error||!data.length) return;
+    if(!data||data.error||!data.length||!candleSeries) return;
     const last = data[data.length-1];
     candleSeries.update({time:last.time,open:last.open,high:last.high,low:last.low,close:last.close});
     volumeSeries.update({time:last.time,value:last.volume,
@@ -496,7 +503,7 @@ function drawGridLines(levels){
   // Önce eskilerini temizle
   gridLineSeries.forEach(s=>{try{chart.removeSeries(s)}catch(_){}});
   gridLineSeries=[];
-  if(!chartData.length||!levels.length) return;
+  if(!chart||!chartData.length||!levels.length) return;
   const firstT = chartData[0].time;
   const lastT  = chartData[chartData.length-1].time + 3600*48;
 
@@ -775,12 +782,25 @@ function downloadCSV(){
 }
 
 // ═══════════════════════════════
-// INIT
+// INIT — script yüklenmesini bekle
 // ═══════════════════════════════
-initChart();
-initMiniCharts();
-pollState();
-setInterval(pollState, 5000);   // her 5s state güncelle
+function safeInit(){
+  // LightweightCharts henüz yüklenmediyse bekle
+  if(typeof LightweightCharts === 'undefined'){
+    setTimeout(safeInit, 100);
+    return;
+  }
+  initChart();
+  initMiniCharts();
+  pollState();
+  setInterval(pollState, 5000);
+}
+
+if(document.readyState === 'loading'){
+  document.addEventListener('DOMContentLoaded', safeInit);
+} else {
+  safeInit();
+}
 </script>
 </body>
 </html>

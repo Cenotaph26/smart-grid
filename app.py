@@ -42,19 +42,27 @@ def api_klines():
     symbol   = request.args.get("symbol", "ETHUSDT")
     interval = request.args.get("interval", "1m")
     limit    = request.args.get("limit", "300")
-    testnet  = os.getenv("TESTNET","true").lower()=="true"
-    base = "https://testnet.binancefuture.com" if testnet else "https://fapi.binance.com"
-    url  = f"{base}/fapi/v1/klines?symbol={symbol}&interval={interval}&limit={limit}"
-    try:
-        with urllib.request.urlopen(url, timeout=8) as r:
-            raw = json.loads(r.read())
-        candles = [{"time": int(c[0])//1000,
-                    "open": float(c[1]),"high": float(c[2]),
-                    "low" : float(c[3]),"close":float(c[4]),
-                    "volume":float(c[5])} for c in raw]
-        return jsonify(candles)
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    # Kline verisi için her zaman mainnet public API kullan (auth gerektirmez)
+    # Testnet kline verisi sınırlı/güvenilmez
+    urls_to_try = [
+        f"https://fapi.binance.com/fapi/v1/klines?symbol={symbol}&interval={interval}&limit={limit}",
+        f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}",
+    ]
+    last_err = ""
+    for url in urls_to_try:
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent":"Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=10) as r:
+                raw = json.loads(r.read())
+            candles = [{"time": int(c[0])//1000,
+                        "open": float(c[1]),"high": float(c[2]),
+                        "low" : float(c[3]),"close":float(c[4]),
+                        "volume":float(c[5])} for c in raw]
+            return jsonify(candles)
+        except Exception as e:
+            last_err = str(e)
+            continue
+    return jsonify({"error": last_err}), 500
 
 @app.route("/api/trades/csv")
 def api_trades_csv():
