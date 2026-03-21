@@ -595,17 +595,21 @@ class CandleChart {
       }
     }
 
-    // Zaman ekseni
+    // Zaman ekseni — seyrek ve okunabilir
     ctx.fillStyle = COLORS.txt;
     ctx.font = '9px JetBrains Mono, monospace';
     ctx.textAlign = 'center';
-    const step = Math.max(1, Math.floor(30 / zoom));
+    let lastLabelX = -999;
     visible.forEach((c, i) => {
-      if (i % step !== 0) return;
       const x = toX(i);
+      if (x - lastLabelX < 72) return;
       const d = new Date(c.time * 1000);
       const label = (d.getHours()+'').padStart(2,'0') + ':' + (d.getMinutes()+'').padStart(2,'0');
+      ctx.fillStyle = '#3d5a70';
+      ctx.fillRect(x - 20, H - PADDING.bottom, 40, 1);
+      ctx.fillStyle = COLORS.txt;
       ctx.fillText(label, x, H - 6);
+      lastLabelX = x;
     });
   }
 }
@@ -827,6 +831,7 @@ function renderState(s, fromCache) {
   const dot = document.getElementById('status-dot');
   if (dot) dot.className = 'status-dot' + (s.running ? ' running' : '');
   const u = s.uptime_sec || 0;
+  _uptimeSec = u;  // server'dan sync et
   const uptEl = document.getElementById('tb-uptime');
   if (uptEl) uptEl.textContent =
     (fromCache ? '[ö] ' : '') +
@@ -980,6 +985,35 @@ function safeInit() {
   pollState();
   setTimeout(pollState, 2000);
   setInterval(pollState, 5000);
+
+// Fiyatı her 3s'de Binance'den direkt çek (bot açık/kapalı farketmez)
+async function fetchLivePrice() {
+  try {
+    const res = await fetch('/api/klines?interval=1m&limit=2');
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!data || !data.length) return;
+    const d = data[data.length - 1];
+    const price = parseFloat(d.close);
+    const prEl = document.getElementById('tb-price');
+    const old = lastPrice;
+    if (prEl && price > 0) {
+      prEl.textContent = '$' + price.toLocaleString('en', {minimumFractionDigits:2});
+      prEl.style.color = price > old ? 'var(--green)' : price < old ? 'var(--red)' : 'var(--txt)';
+      document.getElementById('l-price').textContent = '$' + price;
+      lastPrice = price;
+      localStorage.setItem('grid_lp', price);
+    }
+    const chEl = document.getElementById('tb-chg');
+    if (chEl && old > 0) {
+      const pd = price - old;
+      chEl.textContent = (pd >= 0 ? '+' : '') + pd.toFixed(2);
+      chEl.style.background = pd >= 0 ? 'rgba(0,230,118,.15)' : 'rgba(255,61,87,.15)';
+      chEl.style.color = pd >= 0 ? 'var(--green)' : 'var(--red)';
+    }
+  } catch (_) {}
+}
+setInterval(fetchLivePrice, 3000);
 }
 
 if (document.readyState === 'loading') {

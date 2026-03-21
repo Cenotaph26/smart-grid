@@ -18,7 +18,48 @@ def index():
 
 @app.route("/api/state")
 def api_state():
-    return jsonify(STATE.snapshot())
+    snap = STATE.snapshot()
+
+    # Bot çalışmasa bile canlı fiyat + indikatörleri Binance'den çek
+    if not snap["running"] or snap["price"] == 0:
+        try:
+            import urllib.request, json as _json
+            url = "https://fapi.binance.com/fapi/v1/klines?symbol=ETHUSDT&interval=1m&limit=60"
+            req = urllib.request.Request(url, headers={"User-Agent":"GridBot/4"})
+            with urllib.request.urlopen(req, timeout=5) as r:
+                klines = _json.loads(r.read())
+            closes = [float(k[4]) for k in klines]
+            highs  = [float(k[2]) for k in klines]
+            lows   = [float(k[3]) for k in klines]
+            price  = closes[-1]
+            # ATR
+            trs = [max(highs[i]-lows[i], abs(highs[i]-closes[i-1]), abs(lows[i]-closes[i-1]))
+                   for i in range(1, len(closes))]
+            atr = sum(trs[-14:]) / 14 if len(trs) >= 14 else trs[-1] if trs else 0
+            # EMA
+            def ema(vals, p):
+                v = sum(vals[:p]) / p; k = 2/(p+1)
+                for x in vals[p:]: v = x*k + v*(1-k)
+                return v
+            ema20 = ema(closes, 20) if len(closes) >= 20 else closes[-1]
+            ema50 = ema(closes, 50) if len(closes) >= 50 else closes[-1]
+            # RSI
+            d = [closes[i]-closes[i-1] for i in range(1,len(closes))]
+            g = [x for x in d if x > 0]; ls = [-x for x in d if x < 0]
+            ag = sum(g[-14:])/14 if g else 0.001; al = sum(ls[-14:])/14 if ls else 0.001
+            rsi = 100 - 100/(1 + ag/al)
+            snap.update({
+                "price": round(price, 2),
+                "atr"  : round(atr, 4),
+                "ema20": round(ema20, 2),
+                "ema50": round(ema50, 2),
+                "rsi"  : round(rsi, 1),
+                "last_update": "live_market",
+            })
+        except Exception as e:
+            snap["error_msg"] = f"Market data: {e}"
+
+    return jsonify(snap)
 
 @app.route("/api/start", methods=["POST"])
 def api_start():
