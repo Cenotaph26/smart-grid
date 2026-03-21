@@ -37,32 +37,58 @@ def api_stop():
 
 @app.route("/api/klines")
 def api_klines():
-    """Binance'den doğrudan kline çek (TradingView lightweight charts için)"""
-    import urllib.request
-    symbol   = request.args.get("symbol", "ETHUSDT")
+    """Binance public kline API — auth gerektirmez, testnet/mainnet bağımsız"""
+    import urllib.request, urllib.error
+    symbol   = request.args.get("symbol",   "ETHUSDT")
     interval = request.args.get("interval", "1m")
-    limit    = request.args.get("limit", "300")
-    # Kline verisi için her zaman mainnet public API kullan (auth gerektirmez)
-    # Testnet kline verisi sınırlı/güvenilmez
-    urls_to_try = [
+    limit    = int(request.args.get("limit", "300"))
+
+    # CORS header ekle (browser fetch için)
+    def make_response(data, status=200):
+        resp = jsonify(data)
+        resp.headers["Access-Control-Allow-Origin"] = "*"
+        resp.status_code = status
+        return resp
+
+    endpoints = [
         f"https://fapi.binance.com/fapi/v1/klines?symbol={symbol}&interval={interval}&limit={limit}",
         f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}",
     ]
-    last_err = ""
-    for url in urls_to_try:
+    errors = []
+    for url in endpoints:
         try:
-            req = urllib.request.Request(url, headers={"User-Agent":"Mozilla/5.0"})
-            with urllib.request.urlopen(req, timeout=10) as r:
-                raw = json.loads(r.read())
-            candles = [{"time": int(c[0])//1000,
-                        "open": float(c[1]),"high": float(c[2]),
-                        "low" : float(c[3]),"close":float(c[4]),
-                        "volume":float(c[5])} for c in raw]
-            return jsonify(candles)
+            req = urllib.request.Request(
+                url,
+                headers={
+                    "User-Agent": "Mozilla/5.0 (compatible; GridBot/4.0)",
+                    "Accept": "application/json",
+                }
+            )
+            with urllib.request.urlopen(req, timeout=12) as r:
+                raw = json.loads(r.read().decode("utf-8"))
+            if not raw or not isinstance(raw, list):
+                errors.append(f"{url}: boş yanıt")
+                continue
+            candles = [
+                {
+                    "time"  : int(c[0]) // 1000,
+                    "open"  : float(c[1]),
+                    "high"  : float(c[2]),
+                    "low"   : float(c[3]),
+                    "close" : float(c[4]),
+                    "volume": float(c[5]),
+                }
+                for c in raw
+            ]
+            return make_response(candles)
+        except urllib.error.HTTPError as e:
+            errors.append(f"{url}: HTTP {e.code}")
+        except urllib.error.URLError as e:
+            errors.append(f"{url}: {e.reason}")
         except Exception as e:
-            last_err = str(e)
-            continue
-    return jsonify({"error": last_err}), 500
+            errors.append(f"{url}: {e}")
+
+    return make_response({"error": " | ".join(errors)}, 500)
 
 @app.route("/api/trades/csv")
 def api_trades_csv():

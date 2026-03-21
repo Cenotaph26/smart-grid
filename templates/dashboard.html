@@ -119,8 +119,8 @@ body{background:var(--bg);color:var(--txt);font-family:var(--font-mono);font-siz
 .interval-btn.active,.interval-btn:hover{
   background:var(--bg3);color:var(--txt);border-color:var(--blue2)
 }
-#chart-container{flex:1;position:relative;min-height:0}
-#tv-chart{width:100%;height:100%}
+#chart-container{flex:1;position:relative;min-height:0;overflow:hidden}
+#tv-chart{position:absolute;top:0;left:0;width:100%;height:100%}
 .chart-overlay{
   position:absolute;top:8px;left:10px;display:flex;gap:8px;
   pointer-events:none;z-index:10
@@ -133,8 +133,8 @@ body{background:var(--bg);color:var(--txt);font-family:var(--font-mono);font-siz
 
 /* Bottom chart strip */
 .bottom-strip{
-  display:grid;grid-template-columns:1fr 1fr;height:140px;
-  border-top:1px solid var(--border)
+  display:grid;grid-template-columns:1fr 1fr;height:130px;
+  flex-shrink:0;border-top:1px solid var(--border)
 }
 .mini-chart-wrap{position:relative;overflow:hidden}
 .mini-chart-wrap:first-child{border-right:1px solid var(--border)}
@@ -190,11 +190,12 @@ body{background:var(--bg);color:var(--txt);font-family:var(--font-mono);font-siz
 
 /* Error banner */
 .error-bar{
-  display:none;padding:6px 14px;background:rgba(255,61,87,.15);
-  border-bottom:1px solid rgba(255,61,87,.3);color:var(--red);
-  font-size:11px;text-align:center
+  padding:0 14px;max-height:0;overflow:hidden;
+  background:rgba(255,61,87,.15);border-bottom:0 solid rgba(255,61,87,.3);
+  color:var(--red);font-size:11px;text-align:center;
+  transition:max-height .2s,padding .2s,border-width .2s
 }
-.error-bar.show{display:block}
+.error-bar.show{max-height:32px;padding:6px 14px;border-bottom-width:1px}
 
 /* Loading spinner */
 .spinner{
@@ -384,7 +385,11 @@ let rsiHistory = [];
 
 function initChart(){
   const el = document.getElementById('tv-chart');
+  const container = document.getElementById('chart-container');
+  const w = container.clientWidth  || window.innerWidth  - 560;
+  const h = container.clientHeight || 400;
   chart = LightweightCharts.createChart(el, {
+    width: w, height: h,
     layout:{
       background:{type:'Solid',color:'#0c1219'},
       textColor:'#7a9bb5',
@@ -430,12 +435,14 @@ function initChart(){
 
   // Resize observer — başlangıçta da boyutla
   function resizeChart(){
-    const r = el.getBoundingClientRect();
-    if(r.width > 0 && r.height > 0) chart.resize(r.width, r.height);
+    const cont = document.getElementById('chart-container');
+    const w = cont.clientWidth;
+    const h = cont.clientHeight;
+    if(w > 0 && h > 0) chart.resize(w, h);
   }
-  new ResizeObserver(resizeChart).observe(el);
-  // İlk boyutlandırma için kısa gecikme
-  setTimeout(resizeChart, 50);
+  new ResizeObserver(resizeChart).observe(document.getElementById('chart-container'));
+  setTimeout(resizeChart, 100);
+  setTimeout(resizeChart, 500);
 
   loadKlines(currentInterval);
   // Canlı güncelleme: her 30 saniyede bir son mumu güncelle
@@ -446,23 +453,41 @@ async function loadKlines(interval){
   document.getElementById('chart-spinner').style.display='inline-block';
   document.getElementById('chart-status').textContent='Yükleniyor…';
   try{
-    const res = await fetch(`/api/klines?interval=${interval}&limit=500`);
+    const res = await fetch(`/api/klines?interval=${interval}&limit=300`);
+    if(!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    if(data.error) throw new Error(data.error);
+    if(!data || data.error) throw new Error(data?.error || 'Boş yanıt');
+    if(!Array.isArray(data) || data.length === 0) throw new Error('Mum verisi yok');
     chartData = data;
-    const candles = data.map(d=>({time:d.time,open:d.open,high:d.high,low:d.low,close:d.close}));
-    const vols    = data.map(d=>({time:d.time,value:d.volume,color:d.close>=d.open?'rgba(0,230,118,.2)':'rgba(255,61,87,.2)'}));
-    if(!candleSeries||!volumeSeries){
-      document.getElementById('chart-status').textContent='Chart hazırlanıyor, lütfen bekleyin…';
-      setTimeout(()=>loadKlines(interval),500); return;
+
+    // Chart hazır mı? değilse yeniden dene
+    if(!chart || !candleSeries || !volumeSeries){
+      document.getElementById('chart-status').textContent='Chart init bekleniyor…';
+      setTimeout(()=>loadKlines(interval), 300); return;
     }
+
+    const candles = data.map(d=>({
+      time:  d.time,
+      open:  parseFloat(d.open),
+      high:  parseFloat(d.high),
+      low:   parseFloat(d.low),
+      close: parseFloat(d.close),
+    }));
+    const vols = data.map(d=>({
+      time:  d.time,
+      value: parseFloat(d.volume),
+      color: d.close >= d.open ? 'rgba(0,230,118,.2)' : 'rgba(255,61,87,.2)',
+    }));
+
     candleSeries.setData(candles);
     volumeSeries.setData(vols);
     calcAndDrawEMAs(candles);
-    chart.timeScale().fitContent();
-    document.getElementById('chart-status').textContent=`${data.length} mum · ${interval}`;
+    // Biraz bekleyip fitContent çağır (render cycle tamamlansın)
+    setTimeout(()=>{ chart.timeScale().fitContent(); }, 50);
+    document.getElementById('chart-status').textContent = data.length + ' mum · ' + interval;
   } catch(e){
-    document.getElementById('chart-status').textContent='Hata: '+e.message;
+    console.error('loadKlines hata:', e);
+    document.getElementById('chart-status').textContent = '⚠ ' + e.message;
   }
   document.getElementById('chart-spinner').style.display='none';
 }
